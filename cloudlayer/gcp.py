@@ -109,7 +109,7 @@ class GcpAdapter(CloudAdapter):
         job.wait_for_resource_creation()
 
         return job.resource_name
-    
+
     def wait_training(self, job_id: str) -> dict:
         from google.cloud import aiplatform_v1
         from google.api_core.client_options import ClientOptions
@@ -162,6 +162,7 @@ class GcpAdapter(CloudAdapter):
             location=self.cfg.region,
         )
 
+    
         models = aiplatform.Model.list(
             filter=f'display_name="{name}"',
         )
@@ -177,10 +178,110 @@ class GcpAdapter(CloudAdapter):
 
         if not artifact_uri:
             raise ValueError(
-            f"Registered model {name!r} version {version!r} has no artifact URI"
+                f"Registered model {name!r} version {version!r} has no artifact URI"
         )
 
-        return artifact_uri
+        return f"{artifact_uri.rstrip('/')}/model.joblib"
+
+    def deploy(self, model_ref: str, endpoint: str, instance: str) -> str:
+        aiplatform.init(
+            project=self.cfg.project_id,
+            location=self.cfg.region,
+        )
+
+        endpoint_obj = aiplatform.Endpoint.create(
+            display_name=endpoint,
+            labels=self.cfg.tags(3),
+            sync=True,
+        )
+    
+        models = aiplatform.Model.list(
+         filter=f'display_name="{self.cfg.model_registry_name}"',
+        )
+
+        if not models:
+            raise ValueError(
+                f"Registered model {self.cfg.model_registry_name!r} not found"
+            )
+
+        model_id = models[0].name
+
+        registered_model = aiplatform.Model(
+            model_name=f"{model_id}@{model_ref}",
+        )
+
+        artifact_uri = registered_model.gca_resource.artifact_uri
+
+        if not artifact_uri:
+            raise ValueError(
+                f"Registered model version {model_ref!r} has no artifact URI"
+            )
+
+        serving_image = (
+            f"{self.cfg.container_registry}/"
+             "itcs355-serve@sha256:fdff9261412ca447212c78defa1e442c717266c8e4cc1cf94e6f8d79322e0207"
+        )
+
+        serving_model = aiplatform.Model.upload(
+            display_name=f"{self.cfg.model_registry_name}-serve",
+            artifact_uri=artifact_uri,
+            serving_container_image_uri=serving_image,
+            serving_container_predict_route="/predict",
+            serving_container_health_route="/health",
+            serving_container_ports=[8080],
+            serving_container_environment_variables={
+                "CLOUD_PROVIDER": self.cfg.provider,
+                "PROJECT_ID": self.cfg.project_id,
+                "REGION": self.cfg.region,
+                "BLOB_URI": self.cfg.blob_uri,
+                "CONTAINER_REGISTRY": self.cfg.container_registry,
+                "MLFLOW_TRACKING_URI": self.cfg.mlflow_tracking_uri,
+                "MODEL_REGISTRY_NAME": self.cfg.model_registry_name,
+                "IDENTITY_REF": self.cfg.identity_ref,
+                "MODEL_VERSION": str(model_ref),
+            },
+            labels=self.cfg.tags(3),
+            sync=True,
+        )
+
+        endpoint_obj.deploy(
+            model=serving_model,
+            deployed_model_display_name=f"{endpoint}-v{model_ref}",
+            machine_type=instance,
+            min_replica_count=1,
+            max_replica_count=1,
+            traffic_percentage=100,
+            sync=True,
+        )
+
+        return endpoint_obj.resource_name
+
+    def invoke(self, endpoint: str, payload: dict) -> dict:
+        import json
+
+        from google.api_core.client_options import ClientOptions
+        from google.cloud import aiplatform_v1
+        from google.api import httpbody_pb2
+
+        client = aiplatform_v1.PredictionServiceClient(
+            client_options=ClientOptions(
+                api_endpoint=f"{self.cfg.region}-aiplatform.googleapis.com"
+            )
+        )
+
+        http_body = httpbody_pb2.HttpBody(
+            content_type="application/json",
+            data=json.dumps(payload).encode("utf-8"),
+        )
+
+        request = aiplatform_v1.RawPredictRequest(
+            endpoint=endpoint,
+            http_body=http_body,
+        )
+
+        response = client.raw_predict(request=request)
+
+        return json.loads(response.data.decode("utf-8"))
 
     def teardown(self, tags: dict[str, str]) -> list[str]:
         from google.api_core.client_options import ClientOptions

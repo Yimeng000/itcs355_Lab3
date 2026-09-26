@@ -37,11 +37,52 @@ def _load_model():
     """
     name = os.environ.get("MODEL_REGISTRY_NAME")
     version = os.environ.get("MODEL_VERSION")
-    if name and version:
-        import mlflow.sklearn  # imported lazily so tests can run without a registry
+    from pathlib import Path
+    import joblib
 
-        mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "sqlite:///mlflow.db"))
-        return mlflow.sklearn.load_model(f"models:/{name}/{version}")
+    aip_storage_uri = os.environ.get("AIP_STORAGE_URI")
+
+    if aip_storage_uri:
+        from google.cloud import storage
+
+        bucket_name, object_prefix = (
+            aip_storage_uri.removeprefix("gs://").split("/", 1)
+        )
+
+        object_name = f"{object_prefix.rstrip('/')}/model.joblib"
+        local_path = Path("/tmp/model.joblib")
+
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(object_name)
+        blob.download_to_filename(local_path)
+
+        return joblib.load(local_path)
+
+    name = os.environ.get("MODEL_REGISTRY_NAME")
+    version = os.environ.get("MODEL_VERSION")
+
+    if name and version:
+        from cloudlayer.factory import get_adapter
+        from src import config
+
+        cfg = config.load()
+        adapter = get_adapter(cfg)
+
+        model_uri = adapter.get_model_uri(name, version)
+
+        local_path = Path("/tmp/model.joblib")
+        adapter.download(model_uri, str(local_path))
+
+        return joblib.load(local_path)
+
+    path = Path(os.environ.get("MODEL_PATH", "reports/model.joblib"))
+    if not path.exists():
+        raise RuntimeError(
+            "No model available. Set MODEL_REGISTRY_NAME and MODEL_VERSION, or MODEL_PATH."
+        )
+
+    return joblib.load(path)
 
     # Fallback for local development and tests only. Submitting this is not acceptable:
     # your deployed service must load a registered version.

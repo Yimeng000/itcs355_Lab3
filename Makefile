@@ -73,6 +73,20 @@ reload-check: ## Load the registered model by version and score rows
 	python scripts/reload_check.py --name $(MODEL_REGISTRY_NAME) --version $(VERSION)
 
 # --- Lab 3 -------------------------------------------------------------------
+MODEL_REF ?= 1
+ENDPOINT_NAME ?= itcs355-lab3
+INSTANCE ?= n1-standard-2
+
+deploy: ## Deploy registered model to managed endpoint
+	python -c "from src import config; from cloudlayer.factory import get_adapter; \
+	cfg=config.load(); \
+	print(get_adapter(cfg).deploy('$(MODEL_REF)', '$(ENDPOINT_NAME)', '$(INSTANCE)'))"
+
+ENDPOINT_RESOURCE ?= projects/259177885839/locations/asia-southeast1/endpoints/3250835869891821568
+
+smoke: ## Smoke test deployed endpoint with three known payloads
+	PYTHONPATH=. python scripts/smoke_test.py --endpoint "$(ENDPOINT_RESOURCE)"
+
 serve: ## Run the inference service locally on :8080
 	python scripts/export_model.py --out reports/model.joblib
 	MODEL_PATH=reports/model.joblib MODEL_VERSION=local uvicorn service.app:app --port 8080
