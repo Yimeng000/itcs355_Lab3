@@ -217,10 +217,10 @@ class GcpAdapter(CloudAdapter):
                 f"Registered model version {model_ref!r} has no artifact URI"
             )
 
-        serving_image = (
-            f"{self.cfg.container_registry}/"
-             "itcs355-serve@sha256:fdff9261412ca447212c78defa1e442c717266c8e4cc1cf94e6f8d79322e0207"
-        )
+        serving_image = self.cfg.serving_image_uri
+        
+        if not serving_image:
+            raise ValueError("SERVING_IMAGE_URI is not configured")
 
         serving_model = aiplatform.Model.upload(
             display_name=f"{self.cfg.model_registry_name}-serve",
