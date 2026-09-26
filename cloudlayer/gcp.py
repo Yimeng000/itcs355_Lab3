@@ -144,6 +144,12 @@ class GcpAdapter(CloudAdapter):
             location=self.cfg.region,
         )
 
+        existing = aiplatform.Model.list(
+            filter=f'display_name="{name}"',
+        )
+
+        parent_model = existing[0].name if existing else None
+
         model = aiplatform.Model.upload(
             display_name=name,
             artifact_uri=model_uri,
@@ -151,6 +157,8 @@ class GcpAdapter(CloudAdapter):
                 "asia-docker.pkg.dev/vertex-ai/"
                 "prediction/sklearn-cpu.1-6:latest"
             ),
+            parent_model=parent_model,
+            is_default_version=False if parent_model else True,
             sync=True,
         )
 
