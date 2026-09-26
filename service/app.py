@@ -35,29 +35,38 @@ def _load_model():
     Loading per request is the commonest cause of a p99 that looks nothing like p50, and
     it is the first thing to check when your latency distribution has a long tail.
     """
-    name = os.environ.get("MODEL_REGISTRY_NAME")
-    version = os.environ.get("MODEL_VERSION")
     from pathlib import Path
+
     import joblib
 
-    aip_storage_uri = os.environ.get("AIP_STORAGE_URI")
+    model_uri = os.environ.get("MODEL_ARTIFACT_URI")
+    name = os.environ.get("MODEL_REGISTRY_NAME")
+    version = os.environ.get("MODEL_VERSION")
 
-    if aip_storage_uri:
-        from google.cloud import storage
+    if model_uri or (name and version):
+        from cloudlayer.factory import get_adapter
+        from src import config
 
-        bucket_name, object_prefix = (
-            aip_storage_uri.removeprefix("gs://").split("/", 1)
-        )
+        cfg = config.load()
+        adapter = get_adapter(cfg)
 
-        object_name = f"{object_prefix.rstrip('/')}/model.joblib"
+        if not model_uri:
+            model_uri = adapter.get_model_uri(name, version)
+
         local_path = Path("/tmp/model.joblib")
-
-        client = storage.Client()
-        bucket = client.bucket(bucket_name)
-        blob = bucket.blob(object_name)
-        blob.download_to_filename(local_path)
+        adapter.download(model_uri, str(local_path))
 
         return joblib.load(local_path)
+
+    # Local development and tests only.
+    path = Path(os.environ.get("MODEL_PATH", "reports/model.joblib"))
+    if not path.exists():
+        raise RuntimeError(
+            "No model available. Set MODEL_ARTIFACT_URI, "
+            "MODEL_REGISTRY_NAME and MODEL_VERSION, or MODEL_PATH."
+        )
+
+    return joblib.load(path)
 
     name = os.environ.get("MODEL_REGISTRY_NAME")
     version = os.environ.get("MODEL_VERSION")

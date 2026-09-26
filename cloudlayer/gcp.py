@@ -218,7 +218,7 @@ class GcpAdapter(CloudAdapter):
             )
 
         serving_image = self.cfg.serving_image_uri
-        
+
         if not serving_image:
             raise ValueError("SERVING_IMAGE_URI is not configured")
 
@@ -239,6 +239,7 @@ class GcpAdapter(CloudAdapter):
                 "MODEL_REGISTRY_NAME": self.cfg.model_registry_name,
                 "IDENTITY_REF": self.cfg.identity_ref,
                 "MODEL_VERSION": str(model_ref),
+                "MODEL_ARTIFACT_URI": f"{artifact_uri.rstrip('/')}/model.joblib",
             },
             labels=self.cfg.tags(3),
             sync=True,
