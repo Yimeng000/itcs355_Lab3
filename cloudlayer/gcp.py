@@ -293,41 +293,35 @@ class GcpAdapter(CloudAdapter):
         return json.loads(response.data.decode("utf-8"))
 
     def teardown(self, tags: dict[str, str]) -> list[str]:
-        from google.api_core.client_options import ClientOptions
-        from google.cloud import aiplatform_v1
+        from google.cloud import aiplatform
 
-        client = aiplatform_v1.PipelineServiceClient(
-            client_options=ClientOptions(
-                api_endpoint=f"{self.cfg.region}-aiplatform.googleapis.com"
-            )
-        )
-
-        parent = (
-            f"projects/{self.cfg.project_id}/"
-            f"locations/{self.cfg.region}"
+        aiplatform.init(
+            project=self.cfg.project_id,
+            location=self.cfg.region,
         )
 
         deleted: list[str] = []
 
-        for pipeline in client.list_training_pipelines(parent=parent):
-            labels = dict(pipeline.labels)
+        # Delete endpoints that match this lab's labels.
+        for endpoint in aiplatform.Endpoint.list():
+            labels = dict(endpoint.gca_resource.labels)
 
             labels_match = all(
                 labels.get(key) == value
                 for key, value in tags.items()
             )
 
-            legacy_lab2_job = (
-                not labels
-                and pipeline.display_name == "itcs355-lab2-training"
+            if not labels_match:
+                continue
+
+            resource_name = endpoint.resource_name
+
+            endpoint.delete(
+                force=True,
+                sync=True,
             )
 
-            if labels_match or legacy_lab2_job:
-                operation = client.delete_training_pipeline(
-                    name=pipeline.name
-                )
-                operation.result()
-                deleted.append(pipeline.name)
+            deleted.append(resource_name)
 
         return deleted
 
